@@ -3,7 +3,7 @@ Go lib to validate Yubikey OTP tokens
 
 # Usage
 
-Retreive your ClientID and Secret key from YubiCo [here](https://upgrade.yubico.com/getapikey/) (Yubikey required).
+Retrieve your ClientID and Secret key from YubiCo [here](https://upgrade.yubico.com/getapikey/) (Yubikey required).
 
 ```go
 
