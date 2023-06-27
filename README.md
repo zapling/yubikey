@@ -3,6 +3,8 @@ Go lib to validate Yubikey OTP tokens
 
 # Usage
 
+Retreive your ClientID and Secret key from YubiCo [here](https://upgrade.yubico.com/getapikey/) (Yubikey required).
+
 ```go
 
 import (
@@ -28,3 +30,9 @@ func main() {
 }
 
 ```
+
+# TODO
+
+- Verify Yubico SSL certificate?
+- Sign request with `HMAC-SHA-1`
+  - https://developers.yubico.com/OTP/Specifications/OTP_validation_protocol.html
