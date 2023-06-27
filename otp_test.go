@@ -24,10 +24,10 @@ func (f RoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 
 func TestCheckOTP(t *testing.T) {
 	getClient := func(transport RoundTripFunc) Client {
-		httpClient := http.DefaultClient
+		httpClient := *http.DefaultClient
 		httpClient.Transport = transport
 		return Client{
-			HTTPClient: httpClient,
+			HTTPClient: &httpClient,
 			ClientID:   "1",
 		}
 	}
@@ -163,9 +163,24 @@ func TestCheckOTP(t *testing.T) {
 			}
 		})
 
-		_, err := client.CheckOTP(otpToken)
-		assert.ErrorIs(t, err, ErrOTPInvalid)
+		res, err := client.CheckOTP(otpToken)
+		require.Nil(t, err)
+
+		assert.Equal(t, false, res.IsValid())
 	})
+}
+
+func TestCheckOTPHMACSigning(t *testing.T) {
+	client := Client{
+		HTTPClient: http.DefaultClient,
+		ClientID:   "90452",
+		SecretKey:  "Itg74aa+No7//ZfSkdBdoD6UXIY=", // DO NOT USE THIS IN YOUR OWN APPLICATION, GENERATE YOUR OWN AN KEEP IT A SECRET
+	}
+
+	res, err := client.CheckOTP("cccccbenegrnenidtcjbhnbfukuhtiknkvrvchkrjugk")
+	require.Nil(t, err)
+
+	assert.Equal(t, "REPLAYED_OTP", res.Status)
 }
 
 func TestOTPResponseParse(t *testing.T) {
@@ -225,7 +240,7 @@ func TestOTPResponseParse(t *testing.T) {
 	for _, test := range matrix {
 		t.Run(test.desc, func(t *testing.T) {
 			var token OTPResponse
-			err := token.Parse(test.content)
+			err := token.Parse(test.content, "")
 			test.assertFunc(t, &token, err)
 		})
 	}
