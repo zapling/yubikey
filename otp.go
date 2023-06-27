@@ -5,6 +5,9 @@ package yubikey
 // https://developers.yubico.com/OTP/Specifications/OTP_validation_protocol.html
 
 import (
+	"crypto/hmac"
+	"crypto/sha1"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -22,13 +25,14 @@ var defaultAPIServers = []string{
 	"api5.yubico.com",
 }
 
-var ErrOTPInvalid = errors.New("otp is invalid")
 var ErrWrongOTPLength = errors.New("otp length is wrong, should always be 44")
 var ErrTimeout = errors.New("timeout, no API server responded in time")
+var ErrInvalidHMAC = errors.New("hmac is invalid")
 
 type Client struct {
 	HTTPClient *http.Client
 	ClientID   string
+	SecretKey  string
 }
 
 type channelResult struct {
@@ -59,25 +63,21 @@ func (c *Client) CheckOTP(otp string) (*OTPResponse, error) {
 		}
 
 		if res.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("status '%d'", res.StatusCode)
+			return nil, fmt.Errorf("status '%d', body: %s", res.StatusCode, string(res.Body))
 		}
 
 		var otpToken OTPResponse
 
-		if err := otpToken.Parse(res.Body); err != nil {
+		if err := otpToken.Parse(res.Body, c.SecretKey); err != nil {
 			return nil, fmt.Errorf("failed to parse otp response: %w", err)
 		}
 
 		if otp != otpToken.OTP {
-			return &otpToken, fmt.Errorf("otp missmatch, '%s' != '%s'", otp, otpToken.OTP)
+			return &otpToken, fmt.Errorf("otp missmatch, '%s' != '%s', body: %s", otp, otpToken.OTP, string(res.Body))
 		}
 
 		if nonce != otpToken.Nonce {
 			return &otpToken, fmt.Errorf("nonce missmatch, did someone try and spoof the request?")
-		}
-
-		if !otpToken.IsValid() {
-			return nil, fmt.Errorf("status: %s, %w", otpToken.Status, ErrOTPInvalid)
 		}
 
 		return &otpToken, nil
@@ -97,6 +97,25 @@ func (c *Client) performRequest(ch chan channelResult, apiServer, otp, nonce str
 	query.Add("id", c.ClientID)
 	query.Add("otp", otp)
 	query.Add("nonce", nonce)
+
+	if c.SecretKey != "" {
+		secretKey, err := base64.StdEncoding.DecodeString(c.SecretKey)
+		if err != nil {
+			ch <- channelResult{Err: fmt.Errorf("failed to base64 decode secret key: %w", err)}
+			return
+		}
+
+		data := fmt.Sprintf("id=%s&nonce=%s&otp=%s", c.ClientID, nonce, otp)
+		digest := hmac.New(sha1.New, []byte(secretKey))
+		_, err = digest.Write([]byte(data))
+		if err != nil {
+			ch <- channelResult{Err: fmt.Errorf("failed to sign request: %w", err)}
+			return
+		}
+
+		signature := base64.StdEncoding.EncodeToString(digest.Sum(nil))
+		query.Add("h", signature)
+	}
 
 	req.URL.RawQuery = query.Encode()
 
@@ -141,7 +160,7 @@ type OTPResponse struct {
 	raw    string // The raw response from the YubiCo server
 }
 
-func (v *OTPResponse) Parse(content []byte) error {
+func (v *OTPResponse) Parse(content []byte, secretKey string) error {
 	if len(content) == 0 {
 		return fmt.Errorf("no content")
 	}
@@ -172,6 +191,26 @@ func (v *OTPResponse) Parse(content []byte) error {
 			v.T = value
 		case "status":
 			v.Status = value
+		}
+	}
+
+	if secretKey != "" {
+		secretKey, err := base64.StdEncoding.DecodeString(secretKey)
+		if err != nil {
+			return fmt.Errorf("failed to base64 decode secret key: %w", err)
+		}
+
+		data := fmt.Sprintf("nonce=%s&otp=%s&status=%s&t=%s", v.Nonce, v.OTP, v.Status, v.T)
+		digest := hmac.New(sha1.New, []byte(secretKey))
+		_, err = digest.Write([]byte(data))
+		if err != nil {
+			return fmt.Errorf("failed to sign response data: %w", err)
+		}
+
+		signature := base64.StdEncoding.EncodeToString(digest.Sum(nil))
+
+		if signature != v.H {
+			return ErrInvalidHMAC
 		}
 	}
 
