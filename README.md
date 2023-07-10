@@ -1,5 +1,5 @@
 # yubikey
-Go lib to validate Yubikey OTP tokens
+Go lib to validate Yubikey OTP tokens against YubiCo servers
 
 # Usage
 
@@ -15,12 +15,18 @@ import (
 func main() {
     client := yubikey.Client{
         HTTPClient: http.DefaultClient,
-        ClientID: "<clientID>"
+        ClientID: "<clientID>",
+        SecretKey: "<secretKey>", // optional, HMAC signing of the request data will be done
     }
 
     res, err := client.CheckOTP("cccccbenegrnfvfgghcditkerlgvdeifghcrikdebgkt")
     if err != nil {
         // Oh no, something went wrong
+        return
+    }
+
+    if !res.IsValid() {
+        // Token is not valid
         return
     }
 
@@ -34,5 +40,3 @@ func main() {
 # TODO
 
 - Verify Yubico SSL certificate?
-- Sign request with `HMAC-SHA-1`
-  - https://developers.yubico.com/OTP/Specifications/OTP_validation_protocol.html
